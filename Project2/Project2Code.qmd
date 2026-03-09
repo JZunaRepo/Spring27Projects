@@ -1,0 +1,429 @@
+---
+title: "Project2Code"
+author: "Jonnathan Zuna Largo"
+format: html
+editor: visual
+---
+
+## Introduction
+
+Project 2 explores data tidying and transformation in R using three distinct wide format datasets pulled from real-world sources: CONMEBOL 2026 FIFA World Cup qualification standings, a global list of cities ranked by average monthly precipitation, and historical NBA per game statistics from Basketball Reference. Each dataset shares the same structural problem in that key variables are spread across multiple columns rather than being organized into a clean key-value format, making them difficult to analyze directly. The goal of this assignment is to apply the tidyr and dplyr packages to reshape all three datasets from wide to tidy long format, normalize variable structures, handle missing or inconsistent values, and then perform a meaningful analysis on each cleaned dataset. Together these three sources offer a range of contexts, from sports and climate to international soccer, that will demonstrate how the same core tidying principles can be applied across very different data environments.
+
+## Body
+
+## Data 1 Conmebol Data set
+
+Source: <https://en.wikipedia.org/wiki/2026_FIFA_World_Cup_qualification_(CONMEBOL)>
+
+### Code
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+
+url <- "https://raw.githubusercontent.com/JZunaRepo/Spring27Projects/refs/heads/main/Project2/Project2Data/conmebol_data"
+
+df <- read.csv(
+  file = url
+)
+```
+
+```{r}
+head(df)
+```
+
+Inspecting the dataset to see the structure
+
+```{r}
+colnames(df)
+nrow(df)
+```
+
+Since the secon column has an incosisten name, I'll replace it with the correct naming convention
+
+```{r}
+raw_data <- df |>
+  rename(Team = 2)
+
+raw_data$Team
+```
+
+This table can be look at in two ways. The left side represent the standings while the right side is the head to head match results in a matrix. The next section, the table will be separated in two tables to later tidy each more cleanly
+
+```{r}
+standings_wide <- raw_data |>
+  select(Pos, Team, Pld, W, D, L, GF, GA, GD, Pts, Qualification)
+```
+
+```{r}
+h2h_wide <- raw_data |>
+  select(Team, Argentina, Ecuador, Colombia, Uruguay, 
+         Brazil, Paraguay, Bolivia, Venezuela, Peru, Chile)
+```
+
+To normalize this table I'll replace the dashed to actualy negative signs and also transforming charaters to numeric columns to the columns that are numeric.
+
+```{r}
+standings_tidy <- standings_wide |>
+  rename_with(tolower) |>
+  mutate(
+    across(c(pld, w, d, l, gf, ga, pts), as.integer),
+    gd = as.integer(gsub("−", "-", gd))
+  )
+
+glimpse(standings_tidy)
+```
+
+By using the pivot longer to reshape the match result matrix from wide to long format where each row represents one matchup between a home team and a visiting team
+
+```{r}
+h2h_tidy <- h2h_wide |>
+  pivot_longer(
+    cols = -Team,
+    names_to = "opponent",
+    values_to = "result"
+  ) |>
+  rename(home_team = Team) |>
+  rename_with(tolower) |>
+  filter(result != "—") 
+```
+
+The result column look as a score separated by a "-" therefore we need to split each for the analysis section
+
+```{r}
+h2h_tidy <- h2h_tidy |>
+  mutate(result_clean = gsub("–", "-", result)) |>
+  separate(result_clean, into = c("home_goals", "away_goals"), sep = "-", convert = TRUE)
+
+glimpse(h2h_tidy)
+```
+
+Checking for any NA values that might have shown during the transformation
+
+```{r}
+sum(is.na(standings_tidy))
+sum(is.na(h2h_tidy))
+```
+
+### Analysis Conmebol Data
+
+```{r}
+standings_tidy |>
+  arrange(desc(pts)) |>
+  select(team, w, d, l, gf, ga, gd, pts, qualification)
+```
+
+```{r}
+ggplot(standings_tidy, aes(x = reorder(team, pts), y = pts, fill = pts)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_gradient(low = "#f7c59f", high = "#c0392b") +
+  labs(
+    title = "CONMEBOL 2026 World Cup Qualifying Standings",
+    x = "Nation",
+    y = "Points",
+    fill = "Points"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+h2h_tidy |>
+  group_by(home_team) |>
+  summarise(
+    total_home_goals = sum(home_goals, na.rm = TRUE),
+    total_away_goals_conceded = sum(away_goals, na.rm = TRUE),
+    home_gd = total_home_goals - total_away_goals_conceded
+  ) |>
+  arrange(desc(home_gd))
+```
+
+## Data 2 Cities Average Precipitation
+
+### Code
+
+Source: <https://en.wikipedia.org/wiki/List_of_cities_by_average_precipitation>
+
+```{r}
+url <- "https://raw.githubusercontent.com/JZunaRepo/Spring27Projects/refs/heads/main/Project2/Project2Data/CitiesAVGPrecipitation.csv"
+
+df_rain <- read.csv(
+  file = url
+)
+```
+
+```{r}
+head(df_rain)
+```
+
+As shown above, the Year column has numbers formatted with commas and this column is being read as strings, the next step is to strip those commas and coarce to numeric
+
+```{r}
+df_rain <- df_rain |>
+  mutate(Year = as.numeric(gsub(",", "", Year)))
+
+class(df_rain$Year)
+summary(df_rain$Year)
+```
+
+Normalizing naming for all the columns to lower case
+
+```{r}
+df_rain <- df_rain |>
+  rename_with(tolower)
+
+colnames(df_rain)
+```
+
+For this step pivot longer is going to make all 12 month column into rows so each city that had a wide format will not have 12 rows for each month
+
+```{r}
+rain_tidy_data <- df_rain |>
+  pivot_longer(
+    cols = jan:dec,
+    names_to = "month",
+    values_to = "precipitation_mm"
+  )
+
+glimpse(rain_tidy_data)
+nrow(rain_tidy_data)
+```
+
+The following section I'm going to create an order factor so each month can be sorted correctly on a chart or table instead of an alphabetical order
+
+```{r}
+month_levels <- c("jan","feb","mar","apr","may","jun",
+                  "jul","aug","sep","oct","nov","dec")
+
+rain_tidy_data <- rain_tidy_data |>
+  mutate(month = factor(month, levels = month_levels, ordered = TRUE))
+
+levels(rain_tidy_data$month)
+```
+
+Checking for any missing values
+
+```{r}
+sum(is.na(rain_tidy_data$precipitation_mm))
+
+rain_tidy_data |> filter(is.na(precipitation_mm))
+```
+
+### Analysis Cities Average Precipitation
+
+Yearly Precipitation Summary by Country
+
+```{r}
+country_summary <- rain_tidy_data |>
+  group_by(country, city) |>
+  summarise(annual_total = sum(precipitation_mm), .groups = "drop") |>
+  group_by(country) |>
+  summarise(
+    avg_annual_mm = round(mean(annual_total), 1),
+    num_cities = n()
+  ) |>
+  arrange(desc(avg_annual_mm))
+
+print(country_summary)
+```
+
+Seasonal Patterns Across All Cities
+
+```{r}
+monthly_avg <- rain_tidy_data |>
+  group_by(month) |>
+  summarise(avg_precip = round(mean(precipitation_mm), 1))
+```
+
+```{r}
+ggplot(monthly_avg, aes(x = month, y = avg_precip, group = 1)) +
+  geom_line(color = "#2980b9", linewidth = 1.2) +
+  geom_point(color = "#1a5276", size = 3) +
+  labs(
+    title = "Average Monthly Precipitation Across All Cities",
+    x = "Month",
+    y = "Average Precipitation (mm)"
+  ) +
+  theme_minimal()
+```
+
+City Comparison
+
+```{r}
+selected_cities <- rain_tidy_data |>
+  filter(city %in% c("Monrovia", "Cairo", "Lagos", "Cape Town", "Dakar", "Douala"))
+
+ggplot(selected_cities, aes(x = month, y = precipitation_mm, color = city, group = city)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  labs(
+    title = "Monthly Precipitation for Selected African Cities",
+    x = "Month",
+    y = "Precipitation (mm)",
+    color = "City"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+## Data 3
+
+### Code
+
+```{r}
+url <- "https://raw.githubusercontent.com/JZunaRepo/Spring27Projects/refs/heads/main/Project2/Project2Data/NBA_data.csv"
+
+df_nba <- read.csv(
+  file = url
+)
+```
+
+```{r}
+head(df_nba, 5)
+```
+
+After looking at the first 5 rows, it shows that the actual row names are on index 2 therefore, I'll take the name of the columns in its own variable and then assign it as a header
+
+```{r}
+col_names <- as.character(df_nba[2, ])
+colnames(df_nba) <- col_names
+df_nba <- df_nba[-c(1, 2), ]
+rownames(df_nba) <- NULL
+```
+
+```{r}
+head(df_nba, 3)
+```
+
+Given the structure of the website, it repeats each column as reference for the rows on the bottom. In the next section I'll filter those columns to have a clean dataset with no repeated rows
+
+```{r}
+df_nba <- df_nba |>
+  filter(Rk != "Rk", Rk != "Per Game", Rk != "")
+```
+
+Normalizing column names and then select the columns I'm familiar with such as score, pace, shooting efficiency and three-point metrics
+
+```{r}
+df_nba <- df_nba |>
+  rename_with(tolower)
+
+df_nba <- df_nba |>
+  select(season, lg, age, g, pts, ast, trb, fg_pct = `fg%`, 
+         three_p = `3p`, three_pa = `3pa`, three_p_pct = `3p%`,
+         ft_pct = `ft%`, pace, ts_pct = `ts%`)
+
+glimpse(df_nba)
+```
+
+The glimpse above showed that every single column is a character so we need to mutate it to the correct data type
+
+```{r}
+df_nba <- df_nba |>
+  mutate(across(-c(season, lg), ~ suppressWarnings(as.numeric(.))))
+```
+
+Checking for NA
+
+```{r}
+colSums(is.na(df_nba))
+```
+
+The variable colSums shows that there are several blanks in the three points for some seasons and this is expected given that 3 points were not either captured during those time. For the analysis those rows are not going to be considered
+
+Extracting the years for time-series plot
+
+```{r}
+df_nba <- df_nba |>
+  mutate(year = as.integer(substr(season, 1, 4))) |>
+  arrange(year)
+
+head(df_nba |> select(season, year))
+```
+
+Reshape from Wide to Tidy using pivot_longer
+
+```{r}
+nba_tidy_data <- df_nba |>
+  pivot_longer(
+    cols = c(pts, ast, trb, fg_pct, three_p, three_pa, 
+             three_p_pct, ft_pct, pace, ts_pct),
+    names_to = "stat",
+    values_to = "value"
+  )
+
+glimpse(nba_tidy_data)
+nrow(nba_tidy_data)
+```
+
+Checking that the NA were correctly transformed and have the same number os blanks when grouped
+
+```{r}
+nba_tidy_data |>
+  group_by(stat) |>
+  summarise(na_count = sum(is.na(value)))
+```
+
+### Analysis NBA
+
+```{r}
+pts_trend <- nba_tidy_data |>
+  filter(stat == "pts", lg == "NBA")
+
+ggplot(pts_trend, aes(x = year, y = value)) +
+  geom_line(color = "#c0392b", linewidth = 1.2) +
+  geom_point(size = 1.5, color = "#922b21") +
+  labs(
+    title = "NBA League-Wide Scoring Average Per Game (1949-2026)",
+    x = "Season",
+    y = "Points Per Game"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+three_trend <- nba_tidy_data |>
+  filter(stat == "three_pa", !is.na(value))
+
+ggplot(three_trend, aes(x = year, y = value)) +
+  geom_line(color = "#2980b9", linewidth = 1.2) +
+  geom_area(fill = "#aed6f1", alpha = 0.4) +
+  labs(
+    title = "NBA Three-Point Attempts Per Game by Season",
+    x = "Season",
+    y = "3PA Per Game"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+era_summary <- nba_tidy_data |>
+  filter(lg == "NBA") |>
+  mutate(era = case_when(
+    year < 1980 ~ "Pre Three-Point (pre-1980)",
+    year < 2010 ~ "Modern Era (1980-2009)",
+    TRUE        ~ "Current Era (2010-present)"
+  )) |>
+  filter(stat %in% c("pts", "pace", "three_pa", "ts_pct")) |>
+  group_by(era, stat) |>
+  summarise(avg_value = round(mean(value, na.rm = TRUE), 2), .groups = "drop")
+
+ggplot(era_summary, aes(x = era, y = avg_value, fill = era)) +
+  geom_col() +
+  facet_wrap(~ stat, scales = "free_y") +
+  labs(
+    title = "NBA Key Stats Averaged Across Three Eras",
+    x = NULL,
+    y = "Average Value",
+    fill = "Era"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(), legend.position = "bottom")
+```
+
+## Conclusions
+
+In this project I applied a consistent data tidying and transformations pipeline across three structurally distinct wide-format datasets using the tidyr and dplyr packages. For each dataset, the raw data was first preserved in its original wide format as a csv file before any transformation took place, establishing a clean and reproducible starting point. From there, pivot_longer() was used to collapse wide columns into tidy long format structures, rename_with(tolower) was applied to normalize variable naming conventions, and any missing values were handled deliberately, non-numeric entries, and structural inconsistencies unique to each source.
+
+The CONMEBOL data required character cleaning and the separation of a combined standings and match result matrix into two independent tidy tables. The precipitation dataset involved comma formatted numeric values and the conversion of month abbreviations into an ordered factor to support correct montly visualization. The NBA dataset presented the most complex cleaning challenge, requiring the detection and removal of repeated table header rows and a reasoned decision to retain historical NAs rather than discard decades of not available three point era data. Across all three datasets, the final analysis was performed exclusively on the tidy output, with ggplot2 visualizations and summary tables used to interpret each result showing how a structured tidying workflow enables meaningful and reproducible analysis.
