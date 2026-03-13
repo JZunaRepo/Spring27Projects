@@ -1,0 +1,18 @@
+---
+title: "Week7Approach"
+author: "Jonnathan Zuna Largo"
+format: html
+editor: visual
+---
+
+## Introduction
+
+My goal is to create an HTML and also a JSON file by inputting it manually the same structure book data. After creating the files, I will use R to load each file into a dataframe and ensure that both files give me identical results. The requirement for this projects are 3 books in which my choices are: "Astrophysics for people in a hurry" "Atomic Habits"  and "An Introduction to Statistical Learning." I will search the authors, publication year, publisher, and ISBN for each one and then work for the process of creating files and then comparing the results.  
+
+## Approach
+
+Since I already selected the books, I'll write the HTML file by hand using a standard table structure with a header row and one row per book, keeping in mind that multi-author entries will need to be handled in a single cell, likely as a comma-separated list. The JSON file will represent the same data as an array of objects, where each book is its own object with key-value pairs for each attribute and authors stored as an array. After both files are created and saved, I'll move into RStudio and write the loading code. Once both data frames are loaded, I'll compare them using all.equal() or identical() to check whether the structure and values match, and I may need to do some light cleaning or column reordering beforehand to make the comparison fair. 
+
+## Possible Roadblocks
+
+The tricky part of this project is getting both dataframes to be identical or in a structure where I can compare one with the other. The HTML and JSON files may produce slighly different column types especially for multiauthor book. 
