@@ -1,0 +1,23 @@
+[
+  {
+    "Title": "Astrophysics for people in a hurry",
+    "Authors": "Neil deGrasse Tyson",
+    "Year": 2017,
+    "Publisher": "W. W. Norton & Company",
+    "ISBN": "978-0393609394"
+  },
+  {
+    "Title": "Atomic Habits",
+    "Authors": "James Clear",
+    "Year": 2018,
+    "Publisher": "Random House Business Books",
+    "ISBN": "978-1847941848"
+  },
+  {
+    "Title": "An Introduction to Statistical Learning",
+    "Authors": "Gareth James, Daniela Witten, Trevor Hastie, Robert Tibshirani",
+    "Year": 2021,
+    "Publisher": "Springer",
+    "ISBN": "978-1071614174"
+  }
+]
