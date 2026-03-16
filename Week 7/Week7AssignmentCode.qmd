@@ -1,0 +1,143 @@
+---
+title: "Week7AssignmentCode"
+author: "Jonnathan Zuna Largo"
+format: html
+editor: visual
+---
+
+## Introduction
+
+My goal is to create an HTML and also a JSON file by inputting it manually the same structure book data. After creating the files, I will use R to load each file into a dataframe and ensure that both files give me identical results. The requirement for this projects are 3 books in which my choices are: "Astrophysics for people in a hurry" "Atomic Habits"  and "An Introduction to Statistical Learning." I will search the authors, publication year, publisher, and ISBN for each one and then work for the process of creating files and then comparing the results.  
+
+## Body
+
+### Files
+
+In this section I'll create the html file and the json file by using the information from each book I selected
+
+```{html}
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Books</title>
+  </head>
+  <body>
+    <table>
+      <tr>
+        <th>Title</th>
+        <th>Authors</th>
+        <th>Year</th>
+        <th>Publisher</th>
+        <th>ISBN</th>
+      </tr>
+      <tr>
+        <td>Astrophysics for people in a hurry</td>
+        <td>Neil deGrasse Tyson</td>
+        <td>2017</td>
+        <td>W. W. Norton & Company</td>
+        <td>978-0393609394</td>
+      </tr>
+      <tr>
+        <td>Atomic Habits</td>
+        <td>James Clear</td>
+        <td>2018</td>
+        <td>Random House Business Books</td>
+        <td>978-1847941848</td>
+      </tr>
+      <tr>
+        <td>An Introduction to Statistical Learning</td>
+        <td>Gareth James, Daniela Witten, Trevor Hastie, Robert Tibshirani</td>
+        <td>2021</td>
+        <td>Springer</td>
+        <td>978-1071614174</td>
+      </tr>
+    </table>
+  </body>
+</html>
+
+```
+
+
+```{json}
+[
+  {
+    "Title": "Astrophysics for people in a hurry",
+    "Authors": "Neil deGrasse Tyson",
+    "Year": 2017,
+    "Publisher": "W. W. Norton & Company",
+    "ISBN": "978-0393609394"
+  },
+  {
+    "Title": "Atomic Habits",
+    "Authors": "James Clear",
+    "Year": 2018,
+    "Publisher": "Random House Business Books",
+    "ISBN": "978-1847941848"
+  },
+  {
+    "Title": "An Introduction to Statistical Learning",
+    "Authors": "Gareth James, Daniela Witten, Trevor Hastie, Robert Tibshirani",
+    "Year": 2021,
+    "Publisher": "Springer",
+    "ISBN": "978-1071614174"
+  }
+]
+```
+
+### Code 
+
+For the following section the packages rvest will be used for html. The function read_html() parses the file and html_table() extracts the table it finds.
+
+```{r}
+library(rvest)
+html_raw <- read_html("BookInformation.html")
+```
+
+
+```{r}
+df_html <- html_table(html_raw)[[1]]
+head(df_html)
+```
+
+The the json file the package jsonlite handles it perfectly. The function fromJSON() reads the file.
+
+```{r}
+library(jsonlite)
+df_json <- fromJSON("BookInformation.json")
+
+head(df_json)
+```
+
+First, I want to compare the structure for both data frames side by side
+
+```{r}
+names(df_html)
+names(df_json)
+```
+
+Both structures are correct so now I can compare data types
+
+```{r}
+class(df_html)
+class(df_json)
+```
+
+As shown above df_html is coming in a different format than the json file, to compare them both I'll change the html to the same format as the json file
+
+```{r}
+df_html <- as.data.frame(df_html)
+```
+
+Now that both tables are normalized and in the same format, I'll compare them both and both should be identical
+
+```{r}
+all.equal(df_html, df_json)
+```
+
+```{r}
+identical(df_html, df_json)
+```
+
+## Conclusion
+
+Working in this exercise game a more clear understanding on how the same data can live in two different formats and what takes to make them both comparable in a consistent format. Loading the files were straight forward however the comparison part showed a subtle structural difference that I wouldn't have realized if I did not inspect the data frame classes directly. Moving forward, being aware of type and class consistency when loading from multiple sources will be a crucial step to build before working into web scraping and API projects. 
