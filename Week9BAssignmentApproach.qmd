@@ -1,0 +1,20 @@
+---
+title: "Week9AssignmentApproach"
+author: "Jonnathan Zuna Largo"
+format: html
+editor: visual
+---
+
+## Introduction
+
+This assignment require us to select one of the NYT endpoints, authenticate securely using an API key, make a live request from R, parse the JSON response, and deliver a clean, tidy data frame ready for analysis. The goal is not just to pull data but to ask a meaningful question and use the API response to begin answering it. Rather than a simple retrieval exercise, this is an end to end data pipeline task that mirrors what real data work looks like when consuming third party web services.
+
+## Approach
+
+My plan is to use the NYT Books API, specifically the bestsellers lists endpoint, to answer the question: which authors have appeared most frequently on the hardcover fiction bestseller list over recent weeks and what does that tell us about dominance in that space? I will start by registering for an API key through the NYT Developer Network and storing it in my local R environment using a .Renviron file so it is never hard-coded into the script. From there I will use Sys.getenv() to retrieve the key at runtime and pass it as a query parameter in a GET request made with the httr package. Once I receive the response, I will check the status code to confirm a successful call before extracting the content and passing it to jsonlite from JSON() for parsing.
+
+The fields I primarily care about are the book title, author, rank, weeks on list, and publisher. What I can do is a brief grouped summary to count author appearances and rank frequency, then produce a simple visualization with ggplot2 to surface the answer to my question.
+
+## Possible Roadblocks
+
+The most likely friction points in this assignment fall into a few categories. First, the NYT API enforces rate limits, so if I make too many requests too quickly during testing I may get blocked temporarily. Second, the JSON structure returned by the Books API might be nested? in a way that is not immediately obvious, with books living inside a results array that itself contains list metadata, Lastly, some fields like description or contributor notes may come back as empty strings or nulls depending on the book, so I will need to handle missing values explicitly rather than assuming complete records.
