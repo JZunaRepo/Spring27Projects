@@ -1,0 +1,103 @@
+---
+title: "Week9AssignmentCode"
+author: "Jonnathan Zuna Largo"
+format: html
+editor: visual
+---
+
+## Introduction
+
+This assignment require us to select one of the NYT endpoints, authenticate securely using an API key, make a live request from R, parse the JSON response, and deliver a clean, tidy data frame ready for analysis. The goal is not just to pull data but to ask a meaningful question and use the API response to begin answering it. Rather than a simple retrieval exercise, this is an end to end data pipeline task that mirrors what real data work looks like when consuming third party web services.
+
+## Code
+
+### Libraries
+
+```{r}
+library(httr)
+library(jsonlite)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+```
+
+### API Key
+
+This section we make a
+
+```{r}
+api_key <- Sys.getenv("NYT_API_KEY")
+
+response <- GET(
+  url = "https://api.nytimes.com/svc/books/v3/lists/current/hardcover-fiction.json",
+  query = list(`api-key` = api_key)
+)
+
+status_code(response)
+```
+
+Parsing the Json response and obseving what was parsed
+
+```{r}
+raw_content <- content(response, as = "text", encoding = "UTF-8")
+parsed <- fromJSON(raw_content, flatten = TRUE)
+names(parsed)
+```
+
+Inside the results I can see that my target "books" is there
+
+```{r}
+names(parsed$results)
+```
+
+Now we can observe the fileds available in books
+
+```{r}
+names(parsed$results$books)
+```
+
+Only selected fileds will be used are stated in my introduction. This section creates the datafram books_df
+
+```{r}
+books_df <- parsed$results$books |>
+  select(title, author, publisher, rank, rank_last_week, weeks_on_list, description) |>
+  as_tibble() |>
+  mutate(
+    rank = as.integer(rank),
+    rank_last_week = as.integer(rank_last_week),
+    weeks_on_list = as.integer(weeks_on_list)
+  )
+
+glimpse(books_df)
+```
+
+```{r}
+author_summary <- books_df |>
+  arrange(desc(weeks_on_list)) |>
+  select(title, author, rank, weeks_on_list)
+
+print(author_summary)
+```
+
+To make the graph it is helpful to sorted and maake the bars horizontal for better so it can be readable
+
+```{r}
+books_df |>
+  arrange(desc(weeks_on_list)) |>
+  ggplot(aes(x = reorder(title, weeks_on_list), y = weeks_on_list, fill = weeks_on_list)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_gradient(low = "steelblue", high = "darkblue") +
+  labs(
+    title = "Weeks on the NYT Hardcover Fiction Bestseller List",
+    x = NULL,
+    y = "Weeks on List",
+    fill = "Weeks",
+    caption = paste("Published date:", parsed$results$published_date)
+  ) +
+  theme_minimal()
+```
+
+## Conclusion
+
+The data returned by the NYT Books API was largely clean and required minimal intervention. The response JSON is nested, with the books data living inside parsed-results-books, which required navigating two levels to parse the object before extracting it. I seleted 7 fileds total from the available fileds and those were: title, author, publisher, rank, rank_last_week, weeks_on_list, and description. The three numeric fields, rank, rank_last_week, and weeks_on_list, I changed them to integer using as.integer() since JSON parsing via jsonlite returns them as numeric by default. A rank_last_week value of zero indicates the book is newly entered on the list this week and did not hold a position the prior week, which is meaningful context rather than a missing value, so no imputation was applied.
