@@ -1,0 +1,14 @@
+---
+title: "10AAssignmentApproach"
+author: "Jonnathan Zuna Largo"
+format: html
+editor: visual
+---
+
+## Introduction
+
+The assignment centers on sentiment analysis, a technique in text mining that attempts to assess the emotional tone of written text by evaluating the words it contains against a predefined set of scored or categorized words called a lexicon. Chapter 2 walks through how to implement sentiment analysis within the tidytext framework, using AFINN, Bing, and NRC. The task at hand is twofold process where first, reproduce the core example from that chapter inside R. The goal is not just to run the code but to understand and explain how the findings from the new corpus and new lexicon compare to what the original example produced.
+
+## Approach
+
+To start, I would work through the base example chapter by chapter, beginning with loading the Jane Austen novels then using unnest_tokens() to get one word per row, and joining that against the three lexicons using inner_join(). From there I would build out the sentiment trajectory plots using ggplot2 and the word count bar charts that identify the most common positive and negative contributors, making sure to include the wordcloud visualizations as well. For the extension, I would use the gutenbergr package to pull a different classic text corpus, most likely something with a more varied emotional tone like Shakespeare's tragedies or H.G. Wells novels, so the contrast with Austen is meaningful. For the additional lexicon, I would use the lexicon package which contains the Loughran-McDonald lexicon, originally designed for financial text but still applicable for comparison purposes, and alternatively look at the syuzhet package which includes its own sentiment scoring method. I would run the same narrative arc analysis on the new corpus across all available lexicons and produce side-by-side visualizations comparing results, then write a paragraph explaining where the lexicons agree and where they diverge, and how the new corpus differs emotionally from Austen's novels.

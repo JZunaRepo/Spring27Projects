@@ -1,0 +1,21 @@
+---
+title: "10BAssignmentApproach"
+author: "Jonnathan Zuna Largo"
+format: html
+editor: visual
+---
+
+## Introduction
+
+The Nobel Prize organization offers publicly accessible APIs that expose structured data about laureates and prizes dating back to 1901. This assignment asks us to connect to one or both of those APIs, pull the data down in JSON format, and use R to transform it into tidy data frames that we can actually analyze. From there, we need to come up with four meaningful questions the data can answer, and at least one of those questions has to go beyond a simple count and require something more complex like joining fields, filtering across categories, or comparing attributes between records. The expectation is that each question is paired with the code used to answer it and a clear presentation of the result, whether that is a table, a summary, or a visualization.
+
+## Approach
+
+The first thing is to read the API documentation to understand what endpoints are available and what the JSON response structure looks like. There appear to be two main APIs, one for prizes and one for laureates, and understanding how they are structured before writing any code will save a lot of headaches later. Once I have a feel for the data, I would use httr to make a GET request to the relevant endpoint and then use jsonlite to parse the response. Since the JSON will likely come back as a deeply nested list, I would spend some time carefully flattening it using jsonlite::fromJSON() with flatten = TRUE and inspecting the resulting data frame to understand its shape and field names before doing anything else.
+After the data is loaded, I can draft the four questions. Three of them could be relatively straightforward, things like which category has produced the most laureates, how the gender breakdown of Nobel Prize winners has changed over time, or which country has produced the most laureates overall. The fourth question, which satisfies the join or comparison requirement, would be something like identifying which country lost the most laureates in the sense that a laureate was born there but received the prize as a citizen of a different country. Answering that would require comparing the birth country field against the country of citizenship or affiliation at the time of the award, which means either merging fields within the laureates dataset or joining the laureates and prizes datasets together. For each question I would write focused dplyr pipelines to filter, group, summarize, or join as needed, and then present the result with either a clean table.
+
+## Roadblocks
+
+One of the most likely roadblocks with this assignment is dealing with the nested structure of the JSON response. The "brain drain" style question comparing birth country to award country is vulnerable to nested lines for each records, since it depends on two separate fields being populated and comparable, and older records from the early 1900s may have incomplete or ambiguous country data given how much political borders have shifted over the past century. It will be important to inspect the raw data carefully before building any analysis on top of it and to account for NA values and inconsistent naming conventions early in the cleaning process.
+
+
