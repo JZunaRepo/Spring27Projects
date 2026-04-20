@@ -1,0 +1,209 @@
+---
+title: "10BAssignmentCode"
+author: "Jonnathan Zuna Largo"
+format: html
+editor: visual
+---
+
+## Introduction
+
+The Nobel Prize organization offers publicly accessible APIs that expose structured data about laureates and prizes dating back to 1901. This assignment asks us to connect to one or both of those APIs, pull the data down in JSON format, and use R to transform it into tidy data frames that we can actually analyze. From there, we need to come up with four meaningful questions the data can answer, and at least one of those questions has to go beyond a simple count and require something more complex like joining fields, filtering across categories, or comparing attributes between records. The expectation is that each question is paired with the code used to answer it and a clear presentation of the result, whether that is a table, a summary, or a visualization.
+
+## Code
+
+
+```{r}
+library(httr)
+library(jsonlite)
+library(tidyverse)
+```
+Connecting to the API
+
+```{r}
+response <- GET("https://api.nobelprize.org/2.1/laureates")
+status_code(response)
+```
+Exploring the raw content from the API
+
+```{r}
+raw_content <- content(response, as = "text", encoding = "UTF-8")
+nobel_list <- fromJSON(raw_content, flatten = TRUE)
+names(nobel_list)
+```
+Now that we know the content we can explore the "laureates" section
+
+```{r}
+laureates_raw <- nobel_list$laureates
+dim(laureates_raw)
+names(laureates_raw)
+```
+It looks that there is a limit given that the response only gave us 25. In the next section I will take a look at how many rows there are in total. 
+
+```{r}
+nobel_list$meta
+```
+As expected there was a limit. Reading the documentation we can set off the limit to the total count which is 1018
+
+```{r}
+response_all <- GET("https://api.nobelprize.org/2.1/laureates", 
+                    query = list(limit = 1100))
+raw_content_all <- content(response_all, as = "text", encoding = "UTF-8")
+nobel_list_all <- fromJSON(raw_content_all, flatten = TRUE)
+laureates_raw <- nobel_list_all$laureates
+nrow(laureates_raw)
+```
+
+```{r}
+class(laureates_raw$nobelPrizes)
+laureates_raw$nobelPrizes[[1]]
+```
+
+
+```{r}
+laureates_long <- laureates_raw %>%
+  unnest(nobelPrizes, names_sep = "_")
+dim(laureates_long)
+names(laureates_long) %>% str_subset("nobelPrizes")
+```
+Now that I have all the features needed, I will proceed to just select the fetures that I will be using for the analysis
+
+```{r}
+laureates_clean <- laureates_long %>%
+  select(
+    id,
+    known_name        = knownName.en,
+    gender,
+    birth_country     = birth.place.country.en,
+    birth_country_now = birth.place.countryNow.en,
+    birth_continent   = birth.place.continent.en,
+    birth_year        = birth.year,
+    death_date        = death.date,
+    category          = nobelPrizes_category.en,
+    award_year        = nobelPrizes_awardYear,
+    prize_status      = nobelPrizes_prizeStatus,
+    portion           = nobelPrizes_portion,
+    affiliations      = nobelPrizes_affiliations,
+    residences        = nobelPrizes_residences
+  )
+glimpse(laureates_clean)
+```
+
+1) Which prize category has the most lauretes
+
+```{r}
+category_counts <- laureates_clean %>%
+  filter(prize_status == "received") %>%
+  count(category, sort = TRUE)
+
+category_counts
+```
+
+
+```{r}
+category_counts %>%
+  mutate(category = fct_reorder(category, n)) %>%
+  ggplot(aes(x = category, y = n, fill = category)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = n), hjust = -0.2, size = 4) +
+  coord_flip() +
+  labs(
+    title = "Nobel Prize Laureates by Category",
+    x = NULL,
+    y = "Number of Laureates"
+  ) +
+  theme_minimal()
+```
+2) How has gender breakdown changed over time?
+
+```{r}
+gender_decade <- laureates_clean %>%
+  filter(prize_status == "received",
+         gender %in% c("male", "female")) %>%
+  mutate(decade = floor(as.numeric(award_year) / 10) * 10) %>%
+  count(decade, gender)
+
+gender_decade
+```
+
+```{r}
+gender_decade %>%
+  ggplot(aes(x = decade, y = n, fill = gender)) +
+  geom_col(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(values = c("female" = "#E57373", "male" = "#64B5F6")) +
+  labs(
+    title = "Nobel Prize Gender Breakdown by Decade",
+    x = "Decade",
+    y = "Percentage of Laureates",
+    fill = "Gender"
+  ) +
+  theme_minimal()
+```
+3) Which country has produced the most laureates by birth?
+
+```{r}
+birth_country_counts <- laureates_clean %>%
+  filter(prize_status == "received",
+         !is.na(birth_country_now)) %>%
+  count(birth_country_now, sort = TRUE) %>%
+  slice_max(n, n = 15)
+birth_country_counts
+```
+
+```{r}
+birth_country_counts %>%
+  mutate(birth_country_now = fct_reorder(birth_country_now, n)) %>%
+  ggplot(aes(x = birth_country_now, y = n, fill = birth_country_now)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = n), hjust = -0.2, size = 3.5) +
+  coord_flip() +
+  labs(
+    title = "Top 15 Countries by Nobel Laureate Birth Country",
+    x = NULL,
+    y = "Number of Laureates"
+  ) +
+  theme_minimal()
+```
+4) Which country lost the most laureates to other countries?
+
+```{r}
+laureates_affiliations <- laureates_clean %>%
+  filter(prize_status == "received",
+         !is.na(birth_country_now)) %>%
+  unnest(affiliations, names_sep = "_") %>%
+  filter(!is.na(affiliations_countryNow.en))
+laureates_affiliations
+```
+Comparison of birth countro to affiliation country
+
+```{r}
+brain_drain <- laureates_affiliations %>%
+  filter(birth_country_now != affiliations_countryNow.en) %>%
+  count(birth_country_now, sort = TRUE) %>%
+  slice_max(n, n = 15) %>%
+  rename(country = birth_country_now,
+         laureates_lost = n)
+
+brain_drain
+
+```
+
+
+```{r}
+brain_drain %>%
+  mutate(country = fct_reorder(country, laureates_lost)) %>%
+  ggplot(aes(x = country, y = laureates_lost, fill = country)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = laureates_lost), hjust = -0.2, size = 3.5) +
+  coord_flip() +
+  labs(
+    title = "Top 15 Countries by Nobel Laureate Brain Drain",
+    subtitle = "Laureates born in country but affiliated with institution abroad at time of award",
+    x = NULL,
+    y = "Number of Laureates Lost"
+  ) +
+  theme_minimal()
+```
+## Conclusion
+
+This analysis drew on the Nobel Prize public API to retrieve and transform data on all 1,018 laureates. Across the four questions, several compelling patterns emerged. Physiology or Medicine has produced the most laureates of any category with 232, narrowly edging out Physics at 230, while Economic Sciences remains the smallest category at 99 laureates, which makes sense given that it was only introduced in 1969. The gender breakdown chart tells a sobering story, as male laureates have dominated every single decade since the prizes began in 1901, with meaningful female representation only beginning to appear in the 2000s and 2010s, and even then women still account for roughly 15 to 20 percent of winners in the most recent decades. On the question of birth country, the United States stands in a league of its own with 299 laureates, more than three times the count of the second place United Kingdom at 95, though this likely reflects both population size and the concentration of major research institutions. Perhaps the most thought provoking finding came from the brain drain analysis, where Germany leads with 29 laureates who were born there but affiliated with a foreign institution at the time of their award, followed closely by the United Kingdom at 27 and Poland at 23. The Polish result is particularly striking given its relatively smaller share of total laureates, suggesting a disproportionately high rate of intellectual immigration, likely connected to the political influence of the twentieth century that pushed many scholars.
