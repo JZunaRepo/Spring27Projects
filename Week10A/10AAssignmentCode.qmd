@@ -1,0 +1,239 @@
+---
+title: "10AAssignmentCode"
+author: "Jonnathan Zuna Largo"
+format: html
+editor: visual
+---
+
+## Introduction
+
+The assignment centers on sentiment analysis, a technique in text mining that attempts to assess the emotional tone of written text by evaluating the words it contains against a predefined set of scored or categorized words called a lexicon. Chapter 2 walks through how to implement sentiment analysis within the tidytext framework, using AFINN, Bing, and NRC. The task at hand is twofold process where first, reproduce the core example from that chapter inside R. The goal is not just to run the code but to understand and explain how the findings from the new corpus and new lexicon compare to what the original example produced.
+
+## Code
+
+```{r}
+library(tidytext)
+library(janeaustenr)
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(ggplot2)
+```
+
+Sentiment lexicons use in the book
+
+```{r}
+# AFINN: numeric scores from -5 to 5
+get_sentiments("afinn")
+
+# Bing: binary positive/negative
+get_sentiments("bing")
+
+# NRC: emotion categories (joy, anger, fear, etc.)
+get_sentiments("nrc")
+```
+
+This is the set up where the novel is assign each line number and chapter number, and then breaks the texxt down into one word per row using the "unnest"tokents()"
+
+```{r}
+tidy_books <- austen_books() %>%
+  group_by(book) %>%
+  mutate(
+    linenumber = row_number(),
+    chapter = cumsum(str_detect(text, 
+                                regex("^chapter [\\divxlc]", 
+                                      ignore_case = TRUE)))
+  ) %>%
+  ungroup() %>%
+  unnest_tokens(word, text)
+
+tidy_books
+```
+Sentiment Analysis
+
+```{r}
+nrc_joy <- get_sentiments("nrc") %>%
+  filter(sentiment == "joy")
+
+tidy_books %>%
+  filter(book == "Emma") %>%
+  inner_join(nrc_joy, by = "word") %>%
+  count(word, sort = TRUE)
+```
+Sentiment trajectory accross all novels. This splits the book into 80-line sections using integer division and calculates net sentiments (positive - negative)
+
+```{r}
+jane_austen_sentiment <- tidy_books %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  count(book, index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>%
+  mutate(sentiment = positive - negative)
+
+ggplot(jane_austen_sentiment, aes(index, sentiment, fill = book)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~book, ncol = 2, scales = "free_x") +
+  labs(title = "Sentiment through Jane Austen's novels (Bing lexicon)")
+```
+
+
+```{r}
+pride_prejudice <- tidy_books %>%
+  filter(book == "Pride & Prejudice")
+
+# AFINN
+afinn <- pride_prejudice %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  group_by(index = linenumber %/% 80) %>%
+  summarise(sentiment = sum(value)) %>%
+  mutate(method = "AFINN")
+
+# Bing and NRC together
+bing_and_nrc <- bind_rows(
+  pride_prejudice %>%
+    inner_join(get_sentiments("bing"), by = "word") %>%
+    mutate(method = "Bing"),
+  pride_prejudice %>%
+    inner_join(
+      get_sentiments("nrc") %>% filter(sentiment %in% c("positive", "negative")),
+      by = "word"
+    ) %>%
+    mutate(method = "NRC")
+) %>%
+  count(method, index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>%
+  mutate(sentiment = positive - negative)
+
+# Combining and plotting
+bind_rows(afinn, bing_and_nrc) %>%
+  ggplot(aes(index, sentiment, fill = method)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~method, ncol = 1, scales = "free_y") +
+  labs(title = "Comparing three lexicons on Pride & Prejudice")
+```
+
+Most common positive and negarive words
+
+```{r}
+bing_word_counts <- tidy_books %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+bing_word_counts %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribution to sentiment", y = NULL,
+       title = "Top words contributing to sentiment in Austen novels")
+```
+
+### Part 2: Extension using a new corpus
+
+For this section I'm using a novel pulled from a text file which is Draklua by Bram Stoker
+
+```{r}
+library(readr)
+library(tibble)
+dracula_raw <- read_lines("https://www.gutenberg.org/files/345/345-0.txt")
+
+```
+
+Checking that the data is readable
+
+```{r}
+dracula <- tibble(
+  text = dracula_raw,
+  linenumber = row_number(dracula_raw)
+)
+
+head(dracula)
+```
+Creating columns for linenumber, chapter and word with one word per row
+
+```{r}
+tidy_dracula <- dracula %>%
+  mutate(
+    chapter = cumsum(str_detect(text, regex("^chapter", ignore_case = TRUE)))
+  ) %>%
+  unnest_tokens(word, text)
+
+tidy_dracula
+```
+Sentiment trajectory using bing
+
+```{r}
+dracula_sentiment <- tidy_dracula %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  count(index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>%
+  mutate(sentiment = positive - negative)
+
+ggplot(dracula_sentiment, aes(index, sentiment, fill = sentiment > 0)) +
+  geom_col(show.legend = FALSE) +
+  labs(title = "Sentiment through Dracula (Bing lexicon)",
+       x = "Narrative position (80-line chunks)",
+       y = "Net sentiment")
+```
+Using an additional sentiment analysis package tool developed by Matthew Jockers at the Nebraska Literay Lab.
+
+```{r}
+library(syuzhet)
+```
+
+Getting syuzhet scores for each unique word
+
+```{r}
+syuzhet_scores <- tibble(
+  word = unique(tidy_dracula$word),
+  value = get_sentiment(unique(tidy_dracula$word), method = "syuzhet")
+) %>%
+  filter(value != 0)
+```
+
+Building sentiment arc 
+
+```{r}
+dracula_syuzhet <- tidy_dracula %>%
+  inner_join(syuzhet_scores, by = "word") %>%
+  group_by(index = linenumber %/% 80) %>%
+  summarise(sentiment = sum(value), .groups = "drop") %>%
+  mutate(method = "Syuzhet")
+```
+
+Building bing version with method label for comparison
+
+```{r}
+dracula_bing <- dracula_sentiment %>%
+  mutate(method = "Bing")
+```
+
+Side by side comparison between Bing and Syuzhet
+
+```{r}
+bind_rows(
+  dracula_bing %>% select(index, sentiment, method),
+  dracula_syuzhet %>% select(index, sentiment, method)
+) %>%
+  ggplot(aes(index, sentiment, fill = sentiment > 0)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~method, ncol = 1, scales = "free_y") +
+  labs(title = "Bing vs Syuzhet: Sentiment through Dracula",
+       x = "Narrative position",
+       y = "Net sentiment")
+```
+## Conclusion
+
+This analysis demonstrated how sentiment analysis can be implemented using tidy data principles in R, first by reproducing the core example from Chapter 2 of the book using Jane Austen's novels, and then by extending it to a stylistically different corpus and an additional lexicon. Applying the Bing and Syuzhet lexicons to Bram Stoker's Dracula revealed a narrative arc that trends considerably more negative than anything found in Austen's works, which aligns with the gothic horror genre of the novel. The comparison between Bing and Syuzhet also highlighted an important methodological point: lexicons do not always agree on the emotional weight of the same text, and the differences are not random. Syuzhet, having been developed and validated specifically on narrative fiction, captures the emotional structure of Dracula in a way that feels more calibrated to the text, while Bing, built on a broader and more modern vocabulary, applies a somewhat blunter instrument to 19th century prose. The tidy text approach proved to be a flexible and readable framework for exploring how emotional tone shifts across the arc of a narrative, and the addition of a domain specific lexicon like Syuzhet meaningfully enriched the analysis beyond what the three built in tidytext lexicons alone could offer.
+
+## Citations
+
+AFINN: Nielsen, F. Å. (2011). A new ANEW: Evaluation of a word list for sentiment analysis in microblogs. Proceedings of the ESWC2011 Workshop on 'Making Sense of Microposts', 93–98.
+
+Bing: Liu, B. (2012). Sentiment Analysis and Opinion Mining. Morgan & Claypool Publishers.
+
+NRC: Mohammad, S. M., & Turney, P. D. (2013). Crowdsourcing a word-emotion association lexicon. Computational Intelligence, 29(3), 436–465.
+
