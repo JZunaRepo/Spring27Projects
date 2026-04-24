@@ -1,0 +1,18 @@
+---
+title: "Week11AssignmentApproach"
+author: "Jonnathan Zuna Largo"
+format: html
+editor: visual
+---
+
+## Introduction
+
+In a previous assignment, we built a Global Baseline Estimate recommender system using survey data, which produced predictions based on overall average ratings adjusted for user and item biases but without any real sense of individual taste. This assignment pushes that work further by asking us to build a genuinely personalized recommendation system, one that actually accounts for the unique preferences of each user rather than relying purely on population level tendencies. The expectation is to choose one personalized algorithm, define what the system will output such as a top-N list or predicted ratings, and evaluate its performance using a principled method like hold-out validation or cross-validation. This is a meaningful step up in complexity from the baseline work, and the goal is to produce a system that demonstrably outperforms the non-personalized approach we already have.
+
+## Approach
+
+Since we already have the survey data structured from the Global Baseline Estimate assignment, the first step is to reload and reshape that data into a proper user-item ratings matrix, where each row represents a user and each column represents an item with cell values being the raw ratings. From there, the plan is to implement user-to-user collaborative filtering, which feels like a natural extension of the baseline work since we are already thinking about users and their rating tendencies. The core idea is that if two users have rated several of the same items similarly, we can use the ratings of that neighbor user to predict what the target user would rate on items they have not yet seen. To do this, we will compute a Pearson correlation matrix across all pairs of users, then for any missing rating we will take a weighted average of ratings from the most similar users who did rate that item. Once the prediction engine is in place, the output will be defined as a top-N recommendation list for each user, specifically surfacing the items they have not yet rated and ranking them by predicted score. For evaluation, we will use a hold-out approach where we mask a random subset of known ratings before building the model, then compare predicted values against those masked actuals using RMSE as the primary metric.
+
+## Roadblocks
+
+One of the more likely challenges with this approach is data sparsity, since survey data had some missing ratings this degrades significantly when two users have very few items in common to correlate over. If the overlap between users is thin, the Pearson correlations will be unstable or even undefined, which means we may need to impose a minimum co-rating threshold before treating two users as genuine neighbors. 
