@@ -1,0 +1,198 @@
+---
+title: "Week11AssignementCode"
+author: "Jonnathan Zuna Largo"
+format: html
+editor: visual
+---
+
+## Introduction
+
+In a previous assignment, we built a Global Baseline Estimate recommender system using survey data, which produced predictions based on overall average ratings adjusted for user and item biases but without any real sense of individual taste. This assignment pushes that work further by asking us to build a genuinely personalized recommendation system, one that actually accounts for the unique preferences of each user rather than relying purely on population level tendencies. The expectation is to choose one personalized algorithm, define what the system will output such as a top-N list or predicted ratings, and evaluate its performance using a principled method like hold-out validation or cross-validation. This is a meaningful step up in complexity from the baseline work, and the goal is to produce a system that demonstrably outperforms the non-personalized approach we already have.
+
+## Code
+
+First I need to connect to the DB and bring the survey data
+
+```{r}
+library(DBI)
+library(RPostgres)
+library(tidyverse)
+
+con <- DBI::dbConnect(
+  RPostgres::Postgres(),
+  dbname = "movies_db",
+  host = "localhost",
+  port = 5432,
+  user = Sys.getenv("DB_USER"),
+  password = Sys.getenv("DB_PASSWORD")
+)
+
+movies <- dbReadTable(con, "final_movie_ratings")
+glimpse(movies)
+```
+
+I'll reuse the code from the assignment to reshape the data to a wide format
+
+```{r}
+ratings_matrix <- movies %>%
+  select(user_id, movie, rating) %>%
+  distinct() %>%
+  pivot_wider(
+    names_from = movie,
+    values_from = rating
+  ) %>%
+  arrange(user_id) %>%
+  column_to_rownames("user_id")
+
+ratings_matrix
+```
+
+Pearson correlation between every pair of users. This section will only use movies that both users actually rated.
+
+```{r}
+user_similarity <- cor(
+  t(ratings_matrix),
+  use = "pairwise.complete.obs",
+  method = "pearson"
+)
+
+round(user_similarity, 2)
+```
+
+This is the core part for the recommender. What this does is for a given user and movie it finds all other user who rated that movie, weigth the rating by how similar they are to the target user and then returns a weighted average. To handle 0s, a minimum is threshold of 0 i set to avoid letting a dissimilar user to drag predictions in the wrong direction
+
+```{r}
+predict_rating <- function(user_id, movie, ratings_mat, sim_mat) {
+  similarities <- sim_mat[as.character(user_id), ]
+  movie_ratings <- ratings_mat[, movie]
+  valid <- !is.na(movie_ratings) & rownames(ratings_mat) != as.character(user_id)
+  if (sum(valid) == 0) return(NA)
+  sim_scores <- similarities[valid]
+  known_ratings <- movie_ratings[valid]
+  has_sim <- !is.na(sim_scores) & sim_scores > 0
+  if (sum(has_sim) > 0) {
+    weighted_sum <- sum(sim_scores[has_sim] * known_ratings[has_sim])
+    sim_total <- sum(abs(sim_scores[has_sim]))
+    return(weighted_sum / sim_total)
+  }
+  
+  return(mean(known_ratings, na.rm = TRUE))
+}
+```
+
+Now we loop over every user and every movie where the rating is NA and fill in a predicted score.
+
+```{r}
+predicted_matrix <- ratings_matrix
+
+for (user in rownames(ratings_matrix)) {
+  for (movie in colnames(ratings_matrix)) {
+    if (is.na(ratings_matrix[user, movie])) {
+      predicted_matrix[user, movie] <- predict_rating(
+        user_id = user,
+        movie = movie,
+        ratings_mat = ratings_matrix,
+        sim_mat = user_similarity
+      )
+    }
+  }
+}
+
+round(predicted_matrix, 2)
+```
+
+```{r}
+top_n_recommendations <- function(user_id, ratings_mat, pred_mat, n = 2) {
+  unseen <- is.na(ratings_mat[as.character(user_id), ])
+  if (sum(unseen) == 0) {
+    return(tibble(user_id = as.integer(user_id), movie = "No unseen movies", predicted_rating = NA_real_))
+  }
+  preds <- as.numeric(pred_mat[as.character(user_id), unseen])
+  names(preds) <- colnames(pred_mat)[unseen]
+  
+  top <- sort(preds, decreasing = TRUE)[1:min(n, length(preds))]
+  
+  tibble(
+    user_id = as.integer(user_id),
+    movie = names(top),
+    predicted_rating = round(as.numeric(top), 2)
+  )
+}
+
+recommendations <- map_dfr(rownames(ratings_matrix), ~top_n_recommendations(
+  user_id = .x,
+  ratings_mat = ratings_matrix,
+  pred_mat = predicted_matrix,
+  n = 2
+))
+
+recommendations
+```
+
+Evaluate the system with RMSE
+
+```{r}
+set.seed(42)
+
+rmse_results <- map_dfr(rownames(ratings_matrix), function(user) {
+  known <- which(!is.na(ratings_matrix[user, ]))
+  if (length(known) < 2) return(NULL)
+  hold_out_idx <- sample(known, 1)
+  hold_out_movie <- colnames(ratings_matrix)[hold_out_idx]
+  actual_rating <- ratings_matrix[user, hold_out_movie]
+  masked_matrix <- ratings_matrix
+  masked_matrix[user, hold_out_movie] <- NA
+  masked_sim <- cor(
+    t(masked_matrix),
+    use = "pairwise.complete.obs",
+    method = "pearson"
+  )
+  
+  predicted <- predict_rating(
+    user_id = user,
+    movie = hold_out_movie,
+    ratings_mat = masked_matrix,
+    sim_mat = masked_sim
+  )
+  
+  tibble(
+    user_id = as.integer(user),
+    movie = hold_out_movie,
+    actual = as.numeric(actual_rating),
+    predicted = round(predicted, 2),
+    sq_error = (as.numeric(actual_rating) - predicted)^2
+  )
+})
+
+rmse_results
+
+rmse_value <- sqrt(mean(rmse_results$sq_error, na.rm = TRUE))
+cat("Hold-out RMSE:", round(rmse_value, 3), "\n")
+
+```
+
+```{r}
+recommendations %>%
+  mutate(user_label = paste("User", user_id)) %>%
+  ggplot(aes(x = predicted_rating, y = reorder(movie, predicted_rating), fill = predicted_rating)) +
+  geom_col() +
+  facet_wrap(~user_label) +
+  scale_fill_gradient(low = "#f7c59f", high = "#e05c00") +
+  labs(
+    title = "Top Movie Recommendations Per User",
+    subtitle = "Based on user-to-user collaborative filtering",
+    x = "Predicted Rating (1-5 scale)",
+    y = "Movie",
+    fill = "Predicted\nRating"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+rmse_value <- sqrt(mean(rmse_results$sq_error, na.rm = TRUE))
+cat("Hold-out RMSE:", round(rmse_value, 3), "\n")
+```
+
+## Conclusion
+
+This analysis extended the previous movie rating work by implementing a user-to-user collaborative filtering recommender system using the same six-movie, six-user dataset built from the Google Form survey and PostgreSQL database. The approach involved reshaping the data into a user-item matrix, computing Pearson correlations between every pair of users, and using those similarity scores as weights to predict ratings for movies each user had not yet seen. The system then surfaced the top two unseen movies per user as a personalized ranked recommendation list. To evaluate performance, a hold-out method was used where one known rating per user was masked before prediction, and the resulting Hold-out RMSE of 1.599 indicates that on average our predicted ratings deviate from actual ratings by about 1.6 points on a 1 to 5 scale. While this error is non-trivial, it is important to contextualize it within the constraints of the dataset since with only six users and six movies, several of which already had missing ratings, the Pearson correlations are computed on very few overlapping data points per user pair, making stable similarity estimation difficult. In practice, collaborative filtering systems benefit enormously from larger datasets where user overlap is richer and correlation scores are more reliable, so the RMSE here reflects the limitations of scale rather than a fundamental flaw in the approach. Notably, User 1 had rated all six movies and received no recommendations, which is itself a meaningful output since the system correctly identified there was nothing left to recommend.
