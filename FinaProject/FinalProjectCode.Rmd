@@ -1,0 +1,306 @@
+---
+title: "Final Project Code"
+output: html_document
+date: "2026-05-11"
+---
+
+## Introduction
+
+Spotify is one of the most widely used music streaming platforms in the world, serving hundreds of millions of users with personalized listening experiences built on sophisticated recommendation algorithms. Features like Daily Mixes and Discover Weekly are central to what makes Spotify feel personal, as they surface songs that feel tailored to individual taste rather than just popularity. For this assignment, the goal is to analyze Spotify's recommender system through a scenario design lens, reverse engineer what we can about how it works using publicly available information and data, and then extend that analysis with our own implementation using real track data. Specifically, we pull audio feature data from a Kaggle CSV dataset containing over 114,000 tracks spanning 112 genres, supplement it with a scraped Wikipedia table of the world's most streamed Spotify songs, and apply k-means clustering across nine audio features including energy, danceability, acousticness, valence, and tempo. The clusters that emerge from this analysis are then used to reason about how Spotify likely groups songs internally when building personalized features like Daily Mixes. The analysis follows an OSEMN workflow, moving from data acquisition through transformation, clustering, visualization, and finally a set of concrete recommendations for how Spotify could improve its recommendation capabilities going forward.
+
+## Code
+
+### Source 1
+
+For this first we are going to use a Kaggle data set with spotify music data
+
+```{r}
+library(tidyverse)
+url <- "https://raw.githubusercontent.com/JZunaRepo/Spring27Projects/refs/heads/main/FinaProject/data.csv"
+
+spotify_df <- read.csv(
+  file = url
+)
+glimpse(spotify_df)
+```
+
+Exploring the dimensions and first rows of the data
+
+```{r}
+dim(spotify_df)
+head(spotify_df)
+```
+
+Checking for any blank values
+
+```{r}
+colSums(is.na(spotify_df))
+```
+
+Now checking how many genres are in the data set. The reason to do this is because this will make the clusters more meaningful and easier to interpret
+
+```{r}
+unique(spotify_df$track_genre)
+```
+
+Checking the distribution of tracks across genres
+
+```{r}
+spotify_df %>% 
+  count(track_genre, sort = TRUE)
+```
+
+After exploring the genres and the tracks per genre let me to the decision to strip down some tracks. The full dataset is too large for k-means to run efficiently so I'm taking a stratified sample of 20 tracks per genre. This keeps representation balanced across all genres while keeping the dataset at a manageable size
+
+```{r}
+set.seed(42)
+
+spotify_sample <- spotify_df %>%
+  group_by(track_genre) %>%
+  slice_sample(n = 20) %>%
+  ungroup()
+
+dim(spotify_sample)
+```
+
+Next, selecting only the numeric audio features for clustering. These are the same features Spotify uses internally tocharacterize and compare songs
+
+```{r}
+audio_features <- spotify_sample %>%
+  select(track_name, artists, track_genre, danceability, energy, 
+         loudness, speechiness, acousticness, instrumentalness, 
+         liveness, valence, tempo)
+
+glimpse(audio_features)
+```
+
+Before clustering I need to scale all the audio features so that each one contributes equally to the distance calculations k-means works by measuring how far apart songs are from each other and without scaling a feature like tempo would dominate simply because its numbers are much larger than something like danceability
+
+```{r}
+audio_scaled <- audio_features %>%
+  select(danceability, energy, loudness, speechiness, 
+         acousticness, instrumentalness, liveness, valence, tempo) %>%
+  scale()
+
+round(colMeans(audio_scaled), 4)
+round(apply(audio_scaled, 2, sd), 4)
+```
+
+To find the optimal number of clusters I'm running k-means for k values from 1 to 10 and recording the total within cluster sum of squares (wss) for each one. The wss tells us how tightly packed the clusters are. A lower wss means songs within each cluster are more similar to each other which is exactly what we want
+
+```{r}
+set.seed(42)
+
+wss <- map_dbl(1:10, function(k) {
+  kmeans(audio_scaled, centers = k, nstart = 25)$tot.withinss
+})
+
+# Now let's plot the elbow curve
+elbow_df <- tibble(k = 1:10, wss = wss)
+
+ggplot(elbow_df, aes(x = k, y = wss)) +
+  geom_line(color = "steelblue", linewidth = 1) +
+  geom_point(size = 3, color = "steelblue") +
+  scale_x_continuous(breaks = 1:10) +
+  labs(
+    title = "Elbow Plot: Finding the Optimal Number of Clusters",
+    x = "Number of Clusters (k)",
+    y = "Total Within-Cluster Sum of Squares"
+  ) +
+  theme_minimal()
+```
+
+Based on the elbow plot I'm choosing k=6 as my number of clusters. The curve flattens noticeably after 6 meaning adding more clusters beyond that point doesn't meaningfully improve how tightly grouped the songs are within each cluster
+
+```{r}
+set.seed(42)
+
+kmeans_result <- kmeans(audio_scaled, centers = 6, nstart = 25)
+```
+
+Now I'll attach the cluster assignments back to our original dataframe so we can see which song landed in which cluster and interpret what each cluster actually represents musically
+
+```{r}
+audio_clustered <- audio_features %>%
+  mutate(cluster = factor(kmeans_result$cluster))
+audio_clustered %>%
+  count(cluster, sort = FALSE)
+```
+
+Now I want to understand what each cluster actually represents in musical terms. I'll do this by calculating the average value of each audio feature per cluster. High energy + high danceability might suggest a party/EDM cluster while high acousticness + low energy might suggest a quiet acoustic or classical cluster.
+
+```{r}
+cluster_profiles <- audio_clustered %>%
+  group_by(cluster) %>%
+  summarise(
+    danceability = round(mean(danceability), 3),
+    energy = round(mean(energy), 3),
+    loudness = round(mean(loudness), 3),
+    speechiness = round(mean(speechiness), 3),
+    acousticness = round(mean(acousticness), 3),
+    instrumentalness = round(mean(instrumentalness), 3),
+    liveness = round(mean(liveness), 3),
+    valence = round(mean(valence), 3),
+    tempo = round(mean(tempo), 3),
+    track_count = n()
+  )
+
+print(cluster_profiles)
+```
+
+To visualize the cluster profiles I need to reshape the data from wide to long format so ggplot can map each feature as a position on the x axis and color by cluster. This is a standard wide to long transformation using pivot_longer
+
+```{r}
+cluster_long <- cluster_profiles %>%
+  select(-track_count, -loudness, -tempo) %>%
+  pivot_longer(cols = -cluster,
+               names_to = "feature",
+               values_to = "value")
+
+ggplot(cluster_long, aes(x = feature, y = value, fill = cluster)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Average Audio Feature Values by Cluster",
+    x = "Audio Feature",
+    y = "Average Value",
+    fill = "Cluster"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+This scatter plot maps each song by its energy and danceability values and colors them by cluster. These two features are the most human-interpretable axes for music, high energy + high danceability is party music while low on both is quiet/ambient. This plot helps us visually confirm that our clusters are actually separating songs in a meaningful way
+
+```{r}
+ggplot(audio_clustered, aes(x = danceability, y = energy, color = cluster)) +
+  geom_point(alpha = 0.4, size = 1.5) +
+  labs(
+    title = "Song Clusters by Energy and Danceability",
+    subtitle = "Each point represents one track, colored by k-means cluster assignment",
+    x = "Danceability",
+    y = "Energy",
+    color = "Cluster"
+  ) +
+  theme_minimal()
+```
+
+Now that I've profiled each cluster I want to attach a human readable label to each one so the analysis tells a clear story. These labels are based on the average feature values we saw in the profile table and the bar chart above.
+
+```{r}
+audio_clustered <- audio_clustered %>%
+  mutate(cluster_label = case_when(
+    cluster == 1 ~ "Energetic & Danceable (Pop/Dance)",
+    cluster == 2 ~ "Moderate Energy (Mainstream)",
+    cluster == 3 ~ "Spoken Word / Comedy",
+    cluster == 4 ~ "Acoustic & Mellow (Folk/Indie)",
+    cluster == 5 ~ "High Intensity (Metal/EDM)",
+    cluster == 6 ~ "Calm & Acoustic (Classical/Ambient)"
+  ))
+
+audio_clustered %>%
+  count(cluster_label, track_genre) %>%
+  arrange(cluster_label, desc(n)) %>%
+  group_by(cluster_label) %>%
+  slice_head(n = 3) %>%
+  print(n = 30)
+```
+
+This final plot redoes the scatter plot but now uses our human readable cluster labels instead of numbers. This is the chart I'll use to support my conclusions in the write up because it connects the data science output back to something a general audience can understand intuitively
+
+```{r}
+ggplot(audio_clustered, aes(x = danceability, y = energy, color = cluster_label)) +
+  geom_point(alpha = 0.4, size = 1.5) +
+  labs(
+    title = "Spotify Song Clusters by Energy and Danceability",
+    subtitle = "K-means clustering (k=6) applied to audio features across 112 genres",
+    x = "Danceability",
+    y = "Energy",
+    color = "Cluster"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        legend.text = element_text(size = 7)) +
+  guides(color = guide_legend(nrow = 3))
+```
+
+### Source 2
+
+For my second data source I'm scraping a web page to satisfy the requirement of having two different source types. I'm using rvest to pull the Wikipedia list of most streamed Spotify songs which gives me a real world popularity ranking that I can join back to my clustered dataset
+
+```{r}
+library(rvest)
+
+url <- "https://en.wikipedia.org/wiki/List_of_most-streamed_songs_on_Spotify"
+
+wiki_page <- read_html(url)
+
+top_streamed <- wiki_page %>%
+  html_element("table.wikitable") %>%
+  html_table()
+
+glimpse(top_streamed)
+head(top_streamed)
+```
+
+First I need to clean up the scraped table column names since they came in with special characters and spaces which makes them hard to work with in R
+
+```{r}
+top_streamed <- top_streamed %>%
+  rename(
+    rank = Rank,
+    track_name = Song,
+    artists = `Artist(s)`,
+    streams_billions = `Streams(billions)`,
+    release_date = `Release date`
+  ) %>%
+  select(rank, track_name, artists, streams_billions, release_date) %>%
+  mutate(
+    rank = as.integer(rank),
+    streams_billions = as.numeric(streams_billions),
+    track_name = str_remove_all(track_name, '"')
+  )
+
+glimpse(top_streamed)
+```
+
+Now I'll join the scraped streaming data to our clustered dataset to see if any of our sampled songs appear on the most streamed list and which clusters they belong to. This connects our audio feature clustering to real world streaming success which is a meaningful insight
+
+```{r}
+clustered_with_streams <- audio_clustered %>%
+  inner_join(top_streamed, by = "track_name")
+
+clustered_with_streams %>%
+  select(track_name, cluster_label, streams_billions) %>%
+  arrange(desc(streams_billions))
+```
+
+With 16 matches between our clustered songs and the world's most streamed tracks I can now visualize which clusters the most popular songs tend to fall into. This is a meaningful real world validation of our clustering approach because if Spotify's most streamed songs cluster together it suggests our audio feature groupings are capturing something real about what makes music resonate with listeners at scale
+
+```{r}
+clustered_with_streams %>%
+  group_by(cluster_label) %>%
+  summarise(
+    song_count = n(),
+    avg_streams = round(mean(streams_billions), 3)
+  ) %>%
+  arrange(desc(song_count)) %>%
+  ggplot(aes(x = reorder(cluster_label, song_count), 
+             y = song_count, fill = cluster_label)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = paste0(song_count, " songs\n", 
+                               avg_streams, "B avg streams")), 
+            hjust = -0.1, size = 3) +
+  coord_flip() +
+  scale_y_continuous(limits = c(0, 10)) +
+  labs(
+    title = "Most Streamed Spotify Songs by Cluster",
+    subtitle = "Where do the world's most streamed tracks fall in our clustering?",
+    x = NULL,
+    y = "Number of Top Streamed Songs"
+  ) +
+  theme_minimal()
+```
+
+## Conclusion
+
+This analysis set out to understand how Spotify's recommender system works by reverse engineering its audio feature based approach through k-means clustering. Using a stratified sample of 2,280 tracks drawn equally across 112 genres, we scaled nine audio features and applied k-means clustering with k=6 selected via elbow plot analysis. The resulting clusters mapped remarkably well onto real musical categories, with the High Intensity cluster capturing death metal and black metal, the Calm and Acoustic cluster grouping sleep, new-age, and piano tracks, the Spoken Word cluster isolating comedy recordings, and the Energetic and Danceable cluster drawing in latino and reggaeton. When we joined our clustered dataset to a scraped list of the world's most streamed Spotify songs, ten of the sixteen matching tracks fell into the Energetic and Danceable cluster with an average of 3 billion streams, strongly suggesting that the audio feature profile of high danceability combined with high energy is not just a common sonic pattern but the dominant driver of mainstream streaming success. This finding has direct implications for how Spotify could improve its recommender system going forward. Rather than relying solely on collaborative filtering based on what similar users have listened to, Spotify could weight audio feature proximity more heavily when seeding new Daily Mix sessions, particularly for users whose listening history skews toward the Energetic and Danceable cluster. Additionally, the existence of a small but distinct Spoken Word cluster with only 25 tracks suggests that Spotify's genre taxonomy may conflate audio content types that listeners experience very differently, and separating spoken audio from musical audio earlier in the recommendation pipeline could meaningfully improve the relevance of suggestions for users who mix both content types in their daily listening.
